@@ -582,7 +582,8 @@ class MyHtmlHelper extends HtmlHelper
 
     public function getGroupName(int $groupId): string
     {
-        return $this->getGroups()[$groupId];
+        $groups = $this->getGroups();
+        return $groups[$groupId] ?? '';
     }
 
     public function getCartIdFromCartFinishedUrl(string $url): int

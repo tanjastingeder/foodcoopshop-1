@@ -27,13 +27,16 @@ use Cake\Http\Response;
 class SelfServiceController extends FrontendController
 {
 
-    public function beforeFilter(EventInterface $event): void
+    public function beforeFilter(\Cake\Event\EventInterface $event): void
     {
         parent::beforeFilter($event);
-        $this->Authentication->allowUnauthenticated([
-            'index',
-            'autoLoginAsSelfServiceCustomer',
-        ]);
+        if ($this->components()->has('Authentication')) {
+            $this->Authentication->allowUnauthenticated([
+                'index',
+                'autoLoginAsSelfServiceCustomer',
+                'checkBarcodeType' ,
+            ]);
+        }
     }
 
     public function autoLoginAsSelfServiceCustomer(): ?Response
@@ -41,24 +44,29 @@ class SelfServiceController extends FrontendController
 
         $this->disableAutoRender();
 
-        $id = (int) $this->getRequest()->getParam('id');
-
+        $id = $this->getRequest()->getParam('id');
+        if (empty($id)) {
+            $pass = $this->getRequest()->getParam('pass');
+            $id = isset($pass[0]) ? $pass[0] : 0;
+        }
+        $id = (int)$id;
         $selfServiceLoginCustomer = array_filter(Configure::read('app.selfServiceLoginCustomers'), function($selfServiceLoginCustomer) use ($id) {
             return $selfServiceLoginCustomer['id'] == $id;
         });
         if (empty($selfServiceLoginCustomer)) {
-            $this->Flash->error(__('Signing_in_failed.'));
+            $this->Flash->error(__('Signing_in_failed.') . ' (Config-ID ' . $id . ' nicht gefunden)');
             return $this->redirect(Configure::read('app.slugHelper')->getHome());
         }
 
-        $customerId =   reset($selfServiceLoginCustomer)['customerId'];
+        $customerId = reset($selfServiceLoginCustomer)['customerId'];
         $customerTable = $this->getTableLocator()->get('Customers');
         $customer = $customerTable->find('auth',
             conditions: [
                 $customerTable->aliasField('id_customer') => $customerId,
                 $customerTable->aliasField('id_default_group') => Customer::GROUP_SELF_SERVICE_CUSTOMER,
-            ],
+            ]
         )->first();
+
         if (!empty($customer)) {
             $this->Authentication->setIdentity($customer);
             Router::setRequest($this->getRequest());
@@ -78,6 +86,31 @@ class SelfServiceController extends FrontendController
         $this->set('categoryId', $categoryId);
 
         $keyword = h(trim($this->getRequest()->getQuery('keyword', '')));
+
+                if ($keyword !== '') {
+            $customersTable = $this->getTableLocator()->get('Customers');
+            try {
+                if (method_exists($customersTable, 'getBarcodeFieldString')) {
+                    $barcodeFieldExpr = 'UPPER(' . $customersTable->getBarcodeFieldString() . ')';
+                    $keywordUpper = strtoupper($keyword);
+
+                    $customerCard = $customersTable->find()
+                        ->select([$customersTable->aliasField('id_customer')])
+                        ->where([
+                            $barcodeFieldExpr . ' = ' => $keywordUpper,
+                            $customersTable->aliasField('active') => APP_ON,
+                        ])
+                        ->limit(1)
+                        ->first();
+
+                    if ($customerCard !== null) {
+                        return $this->redirect(Configure::read('app.slugHelper')->getSelfService());
+                    }
+                }
+            } catch (\Throwable $e) {
+            }
+        }
+
         $this->set('keyword', $keyword);
 
         if (!empty($this->getRequest()->getQuery('productWithError'))) {
@@ -174,8 +207,8 @@ class SelfServiceController extends FrontendController
                         $imgString .= '<br /><img src="'.$imgSrc.'" />';
                     }
                     $this->Flash->success(__('The_product_{0}_was_added_to_your_cart.', [
-                        '<b>' . $products[0]->name . '</b>'
-                    ]) . $imgString);
+                        '<b>' . $products[0]->name . '</b>',
+                    ]));
                     $redirectUrl = Configure::read('app.slugHelper')->getSelfService();
                 }
                 return $this->redirect($redirectUrl);
@@ -230,6 +263,41 @@ class SelfServiceController extends FrontendController
 
         return null;
 
+    }
+
+    public function checkBarcodeType(): void
+    {
+        $this->request->allowMethod(['get']);
+        $barcode = (string)$this->request->getQuery('barcode', '');
+        $type = 'product';
+
+        if ($barcode !== '') {
+            $customersTable = $this->getTableLocator()->get('Customers');
+
+            try {
+                if (method_exists($customersTable, 'getBarcodeFieldString')) {
+                    $barcodeFieldExpr = $customersTable->getBarcodeFieldString();
+
+                    $customer = $customersTable->find()
+                    ->select(['id_customer'])
+                    ->where([
+                    $barcodeFieldExpr . ' =' => $barcode,
+                    $customersTable->aliasField('active') => 1,
+                        ])
+                        ->limit(1)
+                        ->first();
+
+                    if ($customer !== null) {
+                        $type = 'customer';
+                    }
+                }
+            } catch (\Throwable $e) {
+            }
+        }
+
+        $this->set(compact('type'));
+        $this->viewBuilder()->setClassName('Json');
+        $this->viewBuilder()->setOption('serialize', ['type']);
     }
 
 }

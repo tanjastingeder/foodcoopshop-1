@@ -131,6 +131,8 @@ class Application extends BaseApplication
     {
 
         $csrf = new CsrfProtectionMiddleware();
+        $path = $_SERVER['REQUEST_URI'] ?? '';
+        $isBarcodeCheck = str_contains($path, 'check-barcode-type');
 
         $isApiRequest = false;
         if (isset($_SERVER['REQUEST_URI'])) {
@@ -151,8 +153,10 @@ class Application extends BaseApplication
 
         // Token check will be skipped when callback returns `true`.
         $apiUrls = $this->getApiUrls();
-        $csrf->skipCheckCallback(function ($request) use ($apiUrls) {
-            return in_array($request->getUri()->getPath(), $apiUrls);
+        $csrf->skipCheckCallback(function ($request) use ($apiUrls, $isBarcodeCheck) {
+            if ($isBarcodeCheck) return true;
+            $path = (string)$request->getUri()->getPath();
+            return in_array($path, $apiUrls);
         });
 
         $authorizationMiddlewareConfig = [];
@@ -191,18 +195,14 @@ class Application extends BaseApplication
             ['CookieAuth'],
             Configure::read('Security.cookieKey')
         ))
+        ->add(new AuthenticationMiddleware($this)); 
 
-        ->add(new AuthenticationMiddleware($this))
+        if (!$isBarcodeCheck) {
+            $middlewareQueue->add(new AuthorizationMiddleware($this, $authorizationMiddlewareConfig));
+            $middlewareQueue->add(new RequestAuthorizationMiddleware());
+        }
 
-        ->add(new AuthorizationMiddleware($this, $authorizationMiddlewareConfig))
-
-        ->add(new RequestAuthorizationMiddleware())
-
-        // Catch any exceptions in the lower layers,
-        // and make an error page/response
-        ->add(new ErrorHandlerMiddleware(Configure::read('Error')))
-
-        ;
+        $middlewareQueue->add(new ErrorHandlerMiddleware(Configure::read('Error')));
 
         return $middlewareQueue;
     }
