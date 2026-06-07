@@ -68,6 +68,9 @@ foodcoopshop.SelfService = {
     },
 
     injectLoginButtons : function(buttonHtml) {
+        if (this.useDefaultStart) {
+            return; // Bricht ab und verhindert den normalen Login-Button
+        }
         $('.self-service-login-button-wrapper').append(atob(buttonHtml));
     },
 
@@ -458,8 +461,12 @@ foodcoopshop.SelfService = {
             this.defaultStartUrl = startUrl;
             localStorage.setItem('fcs_self_service_start_url', startUrl);
         } else {
-            this.useDefaultStart = false; 
-            localStorage.removeItem('fcs_self_service_start_url');
+            var savedUrl = localStorage.getItem('fcs_self_service_start_url');
+            if (savedUrl) {
+                this.useDefaultStart = true;
+                this.defaultStartUrl = savedUrl;
+            } else {
+                this.useDefaultStart = false; 
             }
         }
     },
